@@ -10,6 +10,7 @@ import static jcuda.driver.JCudaDriver.cuMemFree;
 import static jcuda.driver.JCudaDriver.cuMemcpyHtoD;
 import static jcuda.driver.JCudaDriver.cuMemcpyDtoH;
 import static jcuda.driver.JCudaDriver.cuLaunchKernel;
+import static jcuda.driver.JCudaDriver.cuCtxSynchronize;
 
 import jcuda.Pointer;
 import jcuda.Sizeof;
@@ -51,7 +52,7 @@ public class NeuralNet {
 	 */
 	public SimpleNet[] neurons;
 
-	public class CUDARegion {
+	public static class CUDARegion {
 		private final int[] nodes;
 		
 		public CUdeviceptr[] z;
@@ -244,16 +245,20 @@ public class NeuralNet {
 		CUdeviceptr delta = region.devBDeltaArray[m];
 		clearMem1D(delta, neurons[m].getOutn());
 		clearMem2D(region.devWDeltaArray[m], neurons[m].getInn(), neurons[m].getOutn());
+		cuCtxSynchronize();
 		neurons[m].calc_deriv_b(delta, teacher, true);
 		neurons[m].calc_deriv_w(region.devWDeltaArray[m], region.z[m], nodes[m], delta, nodes[m + 1]);
+		cuCtxSynchronize();
 		
 		while (--m >= 0) {
 			// 隠れ層の計算
 			delta = region.devBDeltaArray[m];
 			clearMem1D(delta, neurons[m].getOutn());
 			clearMem2D(region.devWDeltaArray[m], neurons[m].getInn(), neurons[m].getOutn());
+			cuCtxSynchronize();
 			neurons[m].calc_deriv_b(delta, region.z[m], false);;
 			neurons[m].calc_deriv_w(region.devWDeltaArray[m], region.z[m], nodes[m], delta, nodes[m + 1]);
+			cuCtxSynchronize();
 		}
 		
 		// Phase2: accumlation
@@ -279,6 +284,7 @@ public class NeuralNet {
 					NTHREAD2, NTHREAD2, 1,
 					0, null,
 					kp, null);
+			cuCtxSynchronize();
 		});
 	}
 

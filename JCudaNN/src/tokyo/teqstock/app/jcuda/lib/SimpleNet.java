@@ -8,6 +8,7 @@ import static jcuda.driver.JCudaDriver.cuMemFree;
 import static jcuda.driver.JCudaDriver.cuMemcpyHtoD;
 import static jcuda.driver.JCudaDriver.cuMemcpyDtoH;
 import static jcuda.driver.JCudaDriver.cuLaunchKernel;
+import static jcuda.driver.JCudaDriver.cuCtxSynchronize;
 
 import jcuda.Pointer;
 import jcuda.Sizeof;
@@ -94,6 +95,7 @@ public class SimpleNet {
 				0, null,
 				kp, null
 				);
+		cuCtxSynchronize();
 		
 		if (!bMostouter) {
 			kp = Pointer.to(
@@ -118,6 +120,7 @@ public class SimpleNet {
 					kp, null
 					);
 		}
+		cuCtxSynchronize();
 	}
 
 	/**
@@ -137,6 +140,7 @@ public class SimpleNet {
 				NTHREAD2, NTHREAD2, 1,
 				0, null,
 				kp, null);
+		cuCtxSynchronize();
 	}
 
 	/**
@@ -173,6 +177,7 @@ public class SimpleNet {
 				NTHREAD, 1, 1,
 				0, null,
 				kp, null);
+		cuCtxSynchronize();
 		format = OutputFormat.SIGMOID;
 	}
 
@@ -190,6 +195,7 @@ public class SimpleNet {
 				0, null,
 				kp, null
 				);
+		cuCtxSynchronize();
 		
 		// 線形和を計算する
 		kp = Pointer.to(Pointer.to(devZ), Pointer.to(devW), Pointer.to(in),
@@ -201,6 +207,7 @@ public class SimpleNet {
 				0, null,
 				kp, null
 				);
+		cuCtxSynchronize();
 		
 		// 非線形関数を通す
 		int fmt = 0;
@@ -220,6 +227,7 @@ public class SimpleNet {
 				0, null,
 				kp, null
 				);
+		cuCtxSynchronize();
 		return devOutz;
 	}
 	
