@@ -21,7 +21,7 @@ import jcuda.driver.CUfunction;
  *
  */
 public class SimpleNet {
-	private static final float EPS = 0.001f;
+	private static final float EPS = 0.01f;
 	private static final int NTHREAD = 32;	// for 1D
 	private static final int NTHREAD2 = 8;	// for 2D
 	private final Map<String, CUfunction> fMapper;
@@ -86,31 +86,21 @@ public class SimpleNet {
 	 * @param z
 	 * @return
 	 */
-	public void calc_deriv_b(CUdeviceptr devDB, CUdeviceptr in, boolean bMostouter) {
-		// devDB をクリア
-		Pointer kp = Pointer.to(Pointer.to(devDB), Pointer.to(new int[]{outn}));
-		cuLaunchKernel(fMapper.get("clear1D"),
-				calcBlock(outn), 1, 1,
-				NTHREAD, 1, 1,
-				0, null,
-				kp, null
-				);
-		cuCtxSynchronize();
-		
+	public void calc_deriv_b(CUdeviceptr devDB, CUdeviceptr outz, CUdeviceptr in, boolean bMostouter) {
 		if (!bMostouter) {
-			kp = Pointer.to(
-					Pointer.to(devDB), Pointer.to(devW), Pointer.to(devOutz), Pointer.to(in),
+			Pointer kp = Pointer.to(
+					Pointer.to(devDB), Pointer.to(devW), Pointer.to(outz), Pointer.to(in),
 					Pointer.to(new int[]{inn}), Pointer.to(new int[]{outn})
 					);
 			// 隠れ層の計算
 			cuLaunchKernel(fMapper.get("calc_deriv_b_kernel"),
-					calcBlock(outn), 1, 1,
+					calcBlock(inn), 1, 1,
 					NTHREAD, 1, 1,
 					0, null,
 					kp, null
 					);
 		} else {
-			kp = Pointer.to(Pointer.to(devDB), Pointer.to(in), Pointer.to(devOutz),
+			Pointer kp = Pointer.to(Pointer.to(devDB), Pointer.to(in), Pointer.to(devOutz),
 					Pointer.to(new int[]{outn}));
 			// 最外殻では損失関数の微分を通す
 			cuLaunchKernel(fMapper.get("loss_derivative"),

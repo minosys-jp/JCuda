@@ -34,7 +34,11 @@ public class NNUtil {
 			"vec_add_1d", "vec_add_2d", "learn_1d", "learn_2d"
 	};
 	
-	// fMapper を作成する
+	/**
+	 * fMapper を作成する
+	 * @param fMapper
+	 * @param module
+	 */
 	public static void createMapper(Map<String, CUfunction> fMapper, CUmodule module) {
 		IntStream.range(0,  KERNELS.length).forEach(i->{
 			String key = KERNELS[i];
@@ -44,7 +48,12 @@ public class NNUtil {
 		});
 	}
 	
-	// JCuda ライブラリの初期化
+	/**
+	 * JCudaライブラリの初期化
+	 * @param cuFileName
+	 * @return
+	 * @throws IOException
+	 */
 	public static Map<String, CUfunction> initJCuda(String cuFileName) throws IOException {
         // 例外処理を有効にする
         JCudaDriver.setExceptionsEnabled(true);

@@ -45,7 +45,7 @@ static float calc_div(float *xn, int n, float xmax) {
 
 // softmax 関数
 __device__
-static float calc_softmax(float *xn, float xmax, float div, int n, int m) {
+static float calc_softmax(float *xn, float xmax, float div, int m) {
   return expf(xn[m] - xmax) / div;
 }
 
@@ -77,9 +77,11 @@ __global__ void calc_linear(float *z, float **w, float *xin, int xsize, int ysiz
   const int y = blockDim.x * blockIdx.x + threadIdx.x;
   
   if (y < ysize) {
+    float ztmp = 0.0f;
     for (int x = 0; x < xsize; ++x) {
-      z[y] += xin[x] * w[x][y];
+      ztmp += xin[x] * w[x][y];
     }
+    z[y] = ztmp;
   }
 }
 
@@ -99,7 +101,7 @@ __global__ void calc_output(float *outz, float *z, int ysize, int format) {
     if (y < ysize) {
       float xmax = calc_max(z, ysize);
       float div = calc_div(z, ysize, xmax);
-      outz[y] = calc_softmax(z, xmax, div, ysize, y);
+      outz[y] = calc_softmax(z, xmax, div, y);
     }
     break;
   }
@@ -118,12 +120,15 @@ __global__ void loss_derivative(float *out, float *in, float *outz, int outn) {
 // 損失関数の b 方向の微分
 extern "C"
 __global__ void calc_deriv_b_kernel(float *db, float **w, float *outz, float *in, int xsize, int ysize) {
-  const int y = blockDim.x * blockIdx.x + threadIdx.x;
+  const int x = blockDim.x * blockIdx.x + threadIdx.x;
   
-  if (y < ysize) {
-    for (int x = 0; x < xsize; ++x) {
-      db[y] += w[x][y] * in[x] * sigmoid_deriv(outz[y]);
+  if (x < xsize) {
+    float d = 0.0f;
+    for (int y = 0; y < ysize; ++y) {
+      d += w[x][y] * in[y];
     }
+    d *= sigmoid_deriv(outz[x]);
+    db[x] = d;
   }
 }
 

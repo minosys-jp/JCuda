@@ -236,6 +236,7 @@ public class MNIST extends ImageLabelSet {
 			// TODO Auto-generated method stub
 			devB = new CUdeviceptr();
 			cuMemAlloc(devB, Sizeof.BYTE * n);
+			cuMemcpyHtoD(devB, Pointer.to(b), Sizeof.BYTE * n);
 			if (bhot != null) {
 				devBhotArray = new CUdeviceptr[n];
 				IntStream.range(0,  n).forEach(i->{

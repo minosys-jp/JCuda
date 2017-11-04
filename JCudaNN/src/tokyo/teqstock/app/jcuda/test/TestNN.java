@@ -21,13 +21,13 @@ import jcuda.driver.CUfunction;
  *
  */
 public class TestNN {
-	private static final String CUFILENAME = "jCudaNNKernel.cu";
-	private static final int NSET = 20;
+	private static final String CUFILENAME = "JCudaNNKernel.cu";
+	private static final int NSET = 100;
 	private static final int BATCHSIZE = 100;
 	private static final int NSAMPLE = 10;
 	private static final int COUNT = 10;
 	private static final float LRATE = 0.1f;
-	private static final int[] NODES = { 768, 100, 10 };
+	private static final int[] NODES = { 784, 100, 10 };
 
 	MNIST teacher, apply;
 	Map<String, CUfunction> fMapper;
@@ -54,10 +54,19 @@ public class TestNN {
 	 * @throws IOException
 	 */
 	public void prepare() throws IOException {
+		// JCuda の初期化
+		fMapper = NNUtil.initJCuda(CUFILENAME);
+		
+		// ニューラルネットの初期化
+		nn = new NeuralNet(fMapper, LRATE, NODES);
+		
+		// 教師データ、テストデータの読み込み
 		teacher = MNIST.load("train-images-idx3-ubyte", "train-labels-idx1-ubyte", true, true);
 		apply = MNIST.load("t10k-images-idx3-ubyte", "t10k-labels-idx1-ubyte", true, true);
-		fMapper = NNUtil.initJCuda(CUFILENAME);
-		nn = new NeuralNet(fMapper, LRATE, NODES);
+
+		// DEBUG: 初期重みでの出力
+		int[] samples = createSamples(teacher.getQuantity(), BATCHSIZE);
+		checkOne(teacher, samples);
 	}
 	
 	/**
@@ -65,12 +74,15 @@ public class TestNN {
 	 */
 	public void run() {
 		// トレーニング
+		NeuralNet.CUDARegion region = nn.createDefaultCUDARegion();
 		IntStream.range(0, NSAMPLE).forEachOrdered(s->{
-			nn.backPropagate(teacher, NSET, BATCHSIZE);
+			int[] samples = nn.backPropagate(region, teacher, NSET, BATCHSIZE);
+			double rate = checkOne(teacher, samples);
+			System.out.printf("rate=%.4f\n", rate);
 		});
 	}
 
-	private int[] createSamples(final int q, final int size) {
+	private int[] createSamples(int q, int size) {
 		Random rand = new Random();
 		int[] array = new int[size];
 		IntStream.range(0, size).forEach(i->{
@@ -85,10 +97,14 @@ public class TestNN {
 	 * @return
 	 */
 	private int getArgMax(CUdeviceptr sample) {
-		NeuralNet.CUDARegion region = new NeuralNet.CUDARegion(NODES, nn.neurons, sample);
+		NeuralNet.CUDARegion region = nn.createDefaultCUDARegion();
+		region.z[0] = sample;
 		CUdeviceptr devZ = nn.forward(region);
 		float[] z = new float[NODES[NODES.length - 1]];
 		cuMemcpyDtoH(Pointer.to(z), devZ, Sizeof.FLOAT * z.length);
+		IntStream.range(0,  z.length).forEach(k->{
+			System.out.printf("%.4f,", z[k]);
+		});
 		return argmax(z);
 	}
 	
@@ -96,20 +112,17 @@ public class TestNN {
 	 * １回のループで調査する正答率
 	 * @return
 	 */
-	private double checkOne() {
+	private double checkOne(MNIST mnist, int[] samples) {
 		// 入力データ
 		CUdeviceptr[] batchIn = new CUdeviceptr[BATCHSIZE];
 		
 		// 正解
 		CUdeviceptr[] answer = new CUdeviceptr[BATCHSIZE];
 		
-		// ランダムサンプリング
-		int[] samples = createSamples(apply.getQuantity(), BATCHSIZE);
-		
 		// インデックスからポインタに変換する
 		IntStream.range(0, BATCHSIZE).forEach(i->{
-			batchIn[i] = apply.image.getContentDev(samples[i]);
-			answer[i] = apply.label.getContentDev(samples[i]);
+			batchIn[i] = mnist.image.getContentDev(samples[i]);
+			answer[i] = mnist.label.getContentDev(samples[i]);
 		});
 		
 		// デバイスメモリの内容をホストメモリにコピーする
@@ -122,7 +135,12 @@ public class TestNN {
 		
 		// 正答数を集計
 		double count = (double)IntStream.range(0, BATCHSIZE)
-				.filter(k->getArgMax(batchIn[k]) == argmax(labels[k]))
+				.filter(k->{
+					int predict = getArgMax(batchIn[k]);
+					int actual = argmax(labels[k]);
+					System.out.println(predict + "<=>" + actual);;
+					return predict == actual;
+				})
 				.count();
 		
 		// 全体の数で割り、100 を掛けて正答率を求める
@@ -136,7 +154,9 @@ public class TestNN {
 		// データセットを apply から用意する
 		System.out.println();
 		IntStream.range(0,  COUNT).forEach(c->{
-			double rate = checkOne();
+			// ランダムサンプリング
+			int[] samples = createSamples(apply.getQuantity(), BATCHSIZE);
+			double rate = checkOne(apply, samples);
 			System.out.printf("loop %d: rate=%.2f%%\n", c, rate);
 		});
 		

@@ -82,26 +82,28 @@ public class NeuralNet {
 			
 			// for delta w
 			devWDeltaArray2D = new CUdeviceptr[nodes.length - 1][];
+			devWDeltaArray = new CUdeviceptr[nodes.length - 1];
 			IntStream.range(0,  nodes.length - 1).forEach(k->{
 				devWDeltaArray2D[k] = new CUdeviceptr[nodes[k]];
 				IntStream.range(0, nodes[k]).forEach(i->{
 					devWDeltaArray2D[k][i] = new CUdeviceptr();
 					cuMemAlloc(devWDeltaArray2D[k][i], Sizeof.FLOAT * nodes[k + 1]);
 				});
-				devWDeltaArray = new CUdeviceptr[nodes[k]];
+				devWDeltaArray[k] = new CUdeviceptr();
 				cuMemAlloc(devWDeltaArray[k], Sizeof.POINTER * nodes[k]);
 				cuMemcpyHtoD(devWDeltaArray[k], Pointer.to(devWDeltaArray2D[k]), Sizeof.POINTER * nodes[k]);
 			});
 
 			// for deriv w
 			devWDerivArray2D = new CUdeviceptr[nodes.length - 1][];
+			devWDerivArray = new CUdeviceptr[nodes.length - 1];
 			IntStream.range(0,  nodes.length - 1).forEach(k->{
 				devWDerivArray2D[k] = new CUdeviceptr[nodes[k]];
 				IntStream.range(0, nodes[k]).forEach(i->{
 					devWDerivArray2D[k][i] = new CUdeviceptr();
 					cuMemAlloc(devWDerivArray2D[k][i], Sizeof.FLOAT * nodes[k + 1]);
 				});
-				devWDerivArray = new CUdeviceptr[nodes[k]];
+				devWDerivArray[k] = new CUdeviceptr();
 				cuMemAlloc(devWDerivArray[k], Sizeof.POINTER * nodes[k]);
 				cuMemcpyHtoD(devWDerivArray[k], Pointer.to(devWDeltaArray2D[k]), Sizeof.POINTER * nodes[k]);
 			});
@@ -206,12 +208,14 @@ public class NeuralNet {
 	/**
 	 * １次元メモリのクリア
 	 * @param p
-	 * @param size
+d	 * @param size
 	 */
 	private void clearMem1D(Pointer p, int size) {
-		Pointer kp = Pointer.to(p, Pointer.to(new int[]{size}));
-		cuLaunchKernel(fMapper.get("clear1D"),
-				calcBlock(size), 1, 1,
+		Pointer kp = Pointer.to(Pointer.to(p), Pointer.to(new int[]{size}));
+		CUfunction c1d = fMapper.get("clear1D");
+		int bsize = calcBlock(size);
+		cuLaunchKernel(c1d,
+				bsize, 1, 1,
 				NTHREAD, 1, 1,
 				0, null,
 				kp, null);
@@ -224,8 +228,8 @@ public class NeuralNet {
 	 * @param ysize
 	 */
 	private void clearMem2D(Pointer p, int xsize, int ysize) {
-		Pointer kp = Pointer.to(p, Pointer.to(new int[]{xsize}), Pointer.to(new int[]{ysize}));
-		cuLaunchKernel(fMapper.get("clear1D"),
+		Pointer kp = Pointer.to(Pointer.to(p), Pointer.to(new int[]{xsize}), Pointer.to(new int[]{ysize}));
+		cuLaunchKernel(fMapper.get("clear2D"),
 				calcBlock2D(xsize), calcBlock2D(ysize), 1,
 				NTHREAD2, NTHREAD2, 1,
 				0, null,
@@ -246,9 +250,9 @@ public class NeuralNet {
 		clearMem1D(delta, neurons[m].getOutn());
 		clearMem2D(region.devWDeltaArray[m], neurons[m].getInn(), neurons[m].getOutn());
 		cuCtxSynchronize();
-		neurons[m].calc_deriv_b(delta, teacher, true);
-		neurons[m].calc_deriv_w(region.devWDeltaArray[m], region.z[m], nodes[m], delta, nodes[m + 1]);
-		cuCtxSynchronize();
+		neurons[m].calc_deriv_b(delta, null, teacher, true);
+		neurons[m].calc_deriv_w(region.devWDeltaArray[m], region.z[m],
+				neurons[m].getInn(), delta, neurons[m].getOutn());
 		
 		while (--m >= 0) {
 			// 隠れ層の計算
@@ -256,15 +260,15 @@ public class NeuralNet {
 			clearMem1D(delta, neurons[m].getOutn());
 			clearMem2D(region.devWDeltaArray[m], neurons[m].getInn(), neurons[m].getOutn());
 			cuCtxSynchronize();
-			neurons[m].calc_deriv_b(delta, region.z[m], false);;
-			neurons[m].calc_deriv_w(region.devWDeltaArray[m], region.z[m], nodes[m], delta, nodes[m + 1]);
-			cuCtxSynchronize();
+			neurons[m + 1].calc_deriv_b(delta, region.z[m + 1], region.devBDeltaArray[m + 1], false);;
+			neurons[m].calc_deriv_w(region.devWDeltaArray[m], region.z[m],
+					neurons[m].getInn(), delta, neurons[m].getOutn());
 		}
 		
-		// Phase2: accumlation
+		// Phase2: accumulation
 		IntStream.range(0, neurons.length).forEach(k->{
-			int outn = neurons[k].getOutn();
 			int inn = neurons[k].getInn();
+			int outn = neurons[k].getOutn();
 			Pointer kp = Pointer.to(
 					Pointer.to(region.devBDerivArray[k]),
 					Pointer.to(region.devBDeltaArray[k]),
@@ -297,10 +301,11 @@ public class NeuralNet {
 		// initialize deltas
 		IntStream.range(0, neurons.length).forEach(k->{
 			clearMem1D(region.devBDerivArray[k], neurons[k].getOutn());
-			clearMem2D(region.devBDerivArray[k], neurons[k].getInn(), neurons[k].getOutn());
+			clearMem2D(region.devWDerivArray[k], neurons[k].getInn(), neurons[k].getOutn());
 		});
+		cuCtxSynchronize();
 		
-		// phase1: accumlate deltas
+		// phase1: accumulate deltas
 		IntStream.range(0, samples.length).forEach(m->{
 			// copy input data
 			region.z[0] = ils.image.getContentDev(samples[m]);
@@ -347,6 +352,7 @@ public class NeuralNet {
 					NTHREAD, 1, 1,
 					0, null,
 					kp, null);
+			cuCtxSynchronize();
 		});
 	}
 
@@ -356,12 +362,11 @@ public class NeuralNet {
 	 * @param nset
 	 * @param batchsize
 	 */
-	public int[] backPropagate(ImageLabelSet ils, int nset, int batchsize) {
+	public int[] backPropagate(CUDARegion region, ImageLabelSet ils, int nset, int batchsize) {
 		int[] samples = new int[batchsize];
 		IntStream.range(0,  batchsize).forEach(i->{
 			samples[i] = rand.nextInt(ils.image.getQuantity());
 		});
-		CUDARegion region = new CUDARegion(nodes, neurons, null);
 		IntStream.range(0, nset).forEach(i->{
 			backPropagate(region, ils, samples);
 			if (i % 10 == 0) {
@@ -369,5 +374,13 @@ public class NeuralNet {
 			}
 		});
 		return samples;
+	}
+	
+	/**
+	 * デフォルトの CUDARegion を作成する
+	 * @return
+	 */
+	public CUDARegion createDefaultCUDARegion() {
+		return new CUDARegion(nodes, neurons, null);
 	}
 }
