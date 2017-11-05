@@ -5,7 +5,7 @@
 // 損失関数の微分
 __device__
 static float loss_deriv(float x, float y) {
-  return x - y;
+  return y - x;
 }
 
 // sigmoid 関数
@@ -22,7 +22,7 @@ static float sigmoid_deriv(float outz) {
 
 // 最大値を求める
 __device__
-static float calc_max(float *xn, int n) {
+static float calc_max(float xn[], int n) {
   // 最大値を求める
   float xmax = -1e+5;
   for (int i = 0; i < n; ++i) {
@@ -35,7 +35,7 @@ static float calc_max(float *xn, int n) {
 
 // softmax 関数の分母を求める
 __device__
-static float calc_div(float *xn, int n, float xmax) {
+static float calc_div(float xn[], int n, float xmax) {
   float div = 0.0f;
   for (int i = 0; i < n; ++i) {
     div += expf(xn[i] - xmax);
@@ -45,7 +45,7 @@ static float calc_div(float *xn, int n, float xmax) {
 
 // softmax 関数
 __device__
-static float calc_softmax(float *xn, float xmax, float div, int m) {
+static float calc_softmax(float xn[], float xmax, float div, int m) {
   return expf(xn[m] - xmax) / div;
 }
 
@@ -71,11 +71,13 @@ __global__ void clear2D(float **w, int xsize, int ysize) {
   } 
 }
 
-// 線形和の計算
+// forward 演算
 extern "C"
-__global__ void calc_linear(float *z, float **w, float *xin, int xsize, int ysize) {
+__global__ void calc_forward(float *outz, float **w, float *xin, int xsize, int ysize, int fmt) {
   const int y = blockDim.x * blockIdx.x + threadIdx.x;
-  
+  __shared__ extern float z[];
+
+  // 線形和の計算   
   if (y < ysize) {
     float ztmp = 0.0f;
     for (int x = 0; x < xsize; ++x) {
@@ -83,27 +85,19 @@ __global__ void calc_linear(float *z, float **w, float *xin, int xsize, int ysiz
     }
     z[y] = ztmp;
   }
-}
-
-// 非線形出力関数のベクトル計算
-extern "C"
-__global__ void calc_output(float *outz, float *z, int ysize, int format) {
-  const int y = blockDim.x * blockIdx.x + threadIdx.x;
-   
-  switch (format) {
-  case 0:	// sigmoid
-    if (y < ysize) {
-      outz[y] = sigmoid(z[y]);
-    }
-    break;
-    
-  case 1:	// softmax
-    if (y < ysize) {
+  __syncthreads();
+  
+  // 非線形関数の出力
+  if (y < ysize) {
+    if (fmt == 1) {
+      // softmax 関数
       float xmax = calc_max(z, ysize);
       float div = calc_div(z, ysize, xmax);
-      outz[y] = calc_softmax(z, xmax, div, y);
+      outz[y] = calc_softmax(z, xmax, div, y); 
+    } else {
+      // sigmoid 関数
+      outz[y] = sigmoid(z[y]);
     }
-    break;
   }
 }
 
@@ -119,13 +113,13 @@ __global__ void loss_derivative(float *out, float *in, float *outz, int outn) {
 
 // 損失関数の b 方向の微分
 extern "C"
-__global__ void calc_deriv_b_kernel(float *db, float **w, float *outz, float *in, int xsize, int ysize) {
+__global__ void calc_deriv_b_kernel(float *db, float **w, float *outz, float *bderiv2, int xsize, int ysize) {
   const int x = blockDim.x * blockIdx.x + threadIdx.x;
   
   if (x < xsize) {
     float d = 0.0f;
     for (int y = 0; y < ysize; ++y) {
-      d += w[x][y] * in[y];
+      d += w[x][y] * bderiv2[y];
     }
     d *= sigmoid_deriv(outz[x]);
     db[x] = d;
@@ -158,11 +152,11 @@ __global__ void vec_add_2d(float **wout, float **win, int xsize, int ysize) {
 
 // １次元のベクトル加算
 extern "C"
-__global__ void vec_add_1d(float *wout, float *win, int size) {
+__global__ void vec_add_1d(float *bout, float *bin, int size) {
   const int i = blockDim.x * blockIdx.x + threadIdx.x;
   
   if (i < size) {
-    wout[i] += win[i];
+    bout[i] += bin[i];
   }
 }
 
@@ -179,10 +173,10 @@ __global__ void learn_2d(float **wout, float **deriv, float lrate, int xsize, in
 
 // b に関する学習
 extern "C"
-__global__ void learn_1d(float *wout, float *deriv, float lrate, int size, float nsample) {
+__global__ void learn_1d(float *bout, float *deriv, float lrate, int size, float nsample) {
   const int i = blockDim.x * blockIdx.x + threadIdx.x;
   
   if (i < size) {
-    wout[i] -= lrate * deriv[i] / nsample; 
+    bout[i] -= lrate * deriv[i] / nsample; 
   }
 }

@@ -27,7 +27,7 @@ public class NNUtil {
 	 */
 	private static final String[] KERNELS = {
 			// SimpleNet.java
-			"clear1D", "clear2D", "calc_linear", "calc_output", "loss_derivative",
+			"clear1D", "clear2D", "calc_forward", "loss_derivative",
 			"calc_deriv_b_kernel", "calc_deriv_w_kernel",
 			
 			// NeuralNet.java

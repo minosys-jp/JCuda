@@ -210,7 +210,7 @@ public class NeuralNet {
 	 * @param p
 d	 * @param size
 	 */
-	private void clearMem1D(Pointer p, int size) {
+	public void clearMem1D(Pointer p, int size) {
 		Pointer kp = Pointer.to(Pointer.to(p), Pointer.to(new int[]{size}));
 		CUfunction c1d = fMapper.get("clear1D");
 		int bsize = calcBlock(size);
@@ -227,7 +227,7 @@ d	 * @param size
 	 * @param xsize
 	 * @param ysize
 	 */
-	private void clearMem2D(Pointer p, int xsize, int ysize) {
+	public void clearMem2D(Pointer p, int xsize, int ysize) {
 		Pointer kp = Pointer.to(Pointer.to(p), Pointer.to(new int[]{xsize}), Pointer.to(new int[]{ysize}));
 		cuLaunchKernel(fMapper.get("clear2D"),
 				calcBlock2D(xsize), calcBlock2D(ysize), 1,
@@ -382,5 +382,72 @@ d	 * @param size
 	 */
 	public CUDARegion createDefaultCUDARegion() {
 		return new CUDARegion(nodes, neurons, null);
+	}
+
+	private static float calcLossFunction(float prev, float[] out, float[] label) {
+		float tmp = (float)IntStream.range(0, out.length).mapToDouble(i->
+		(out[i] - label[i]) * (out[i] - label[i]) / 2.0f)
+				.sum();
+		return prev + tmp;
+	}
+	
+	public static int argmax(float[] y) {
+		float xmax = -Float.MAX_VALUE;
+		int imax = 0;
+		
+		for (int i = 0; i < y.length; ++i) {
+			if (xmax < y[i]) {
+				imax = i;
+				xmax = y[i];
+			}
+		}
+		return imax;
+	}
+	
+	static class Count {
+		public long count = 0;
+		float loss = 0.0f;
+	}
+	
+	public static void main(String[] args) throws IOException {
+		Map<String, CUfunction> fMapper = NNUtil.initJCuda("JCudaNNKernel.cu");
+		NeuralNet nn = new NeuralNet(fMapper, 0.3f, new int[]{784, 100, 10});
+		Random rand = new Random();
+		MNIST teacher = MNIST.load("t10k-images-idx3-ubyte", "t10k-labels-idx1-ubyte", true, true);
+		CUDARegion region = nn.createDefaultCUDARegion();
+		float[] outf = new float[10];
+		int nsample = 10;
+		int[] samples = new int[nsample];
+		IntStream.range(0, nsample).forEach(i->{
+			samples[i] = rand.nextInt(teacher.getQuantity());
+		});
+		
+		IntStream.range(0, 20).forEach(k->{
+			nn.backPropagate(region, teacher, samples);
+			
+			Count count = new Count();
+			long total = nsample;
+
+			System.out.printf("loop: %d ==>", k);
+			count.loss = 0.0f;
+			IntStream.range(0, samples.length).forEach(i->{
+				region.z[0] = teacher.image.getContentDev(samples[i]);
+				CUdeviceptr out = nn.forward(region);
+				cuMemcpyDtoH(Pointer.to(outf), out, Sizeof.FLOAT * 10);
+//				IntStream.range(0, 10).forEachOrdered(j->{
+//					System.out.printf("%.4f,", outf[j]);
+//				});
+				int ao = NeuralNet.argmax(outf);
+				int al = NeuralNet.argmax(teacher.label.getContent(samples[i]));
+//				System.out.println(ao + ";" + al);
+				if (ao == al) {
+					++count.count;
+				}
+				count.loss = calcLossFunction(count.loss, outf, teacher.label.getContent(samples[i])); 
+			});
+			count.loss /= (float)nsample;
+			System.out.printf("accuracy: %.2f;", (double)count.count / (double)total * 100.0);
+			System.out.printf("loss:%.4f\n", count.loss);
+		});
 	}
 }

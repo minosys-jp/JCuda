@@ -1,5 +1,6 @@
 package tokyo.teqstock.app.jcuda.lib;
 
+import java.io.IOException;
 import java.util.Map;
 import java.util.stream.IntStream;
 
@@ -21,7 +22,7 @@ import jcuda.driver.CUfunction;
  *
  */
 public class SimpleNet {
-	private static final float EPS = 0.01f;
+	private static final float EPS = 1.000f;
 	private static final int NTHREAD = 32;	// for 1D
 	private static final int NTHREAD2 = 8;	// for 2D
 	private final Map<String, CUfunction> fMapper;
@@ -51,12 +52,7 @@ public class SimpleNet {
 	public CUdeviceptr devB;
 	public OutputFormat format;
 
-	/**
-	 * linear part
-	 */
-	public CUdeviceptr devZ;
-
-	/**
+	/*
 	 * forward output caches
 	 */
 	public CUdeviceptr devOutz;
@@ -100,7 +96,7 @@ public class SimpleNet {
 					kp, null
 					);
 		} else {
-			Pointer kp = Pointer.to(Pointer.to(devDB), Pointer.to(in), Pointer.to(devOutz),
+			Pointer kp = Pointer.to(Pointer.to(devDB), Pointer.to(devOutz), Pointer.to(in),
 					Pointer.to(new int[]{outn}));
 			// 最外殻では損失関数の微分を通す
 			cuLaunchKernel(fMapper.get("loss_derivative"),
@@ -157,8 +153,6 @@ public class SimpleNet {
 		cuMemcpyHtoD(devW, Pointer.to(devWArray), Sizeof.POINTER * inn);
 		devB = new CUdeviceptr();
 		cuMemAlloc(devB, Sizeof.FLOAT * outn);
-		devZ = new CUdeviceptr();
-		cuMemAlloc(devZ, Sizeof.FLOAT * outn);
 		devOutz = new CUdeviceptr();
 		cuMemAlloc(devOutz, Sizeof.FLOAT * outn);
 		Pointer kp = Pointer.to(Pointer.to(devB), Pointer.to(new int[]{outn}));
@@ -177,29 +171,7 @@ public class SimpleNet {
 	 * @return
 	 */
 	public CUdeviceptr forward(CUdeviceptr in) {
-		// z をクリアする
-		Pointer kp = Pointer.to(Pointer.to(devZ), Pointer.to(new int[]{outn}));
-		cuLaunchKernel(fMapper.get("clear1D"),
-				calcBlock(outn), 1, 1,
-				NTHREAD, 1, 1,
-				0, null,
-				kp, null
-				);
-		cuCtxSynchronize();
-		
-		// 線形和を計算する
-		kp = Pointer.to(Pointer.to(devZ), Pointer.to(devW), Pointer.to(in),
-				Pointer.to(new int[]{inn}), Pointer.to(new int[]{outn})
-				);
-		cuLaunchKernel(fMapper.get("calc_linear"),
-				calcBlock(outn), 1, 1,
-				NTHREAD, 1, 1,
-				0, null,
-				kp, null
-				);
-		cuCtxSynchronize();
-		
-		// 非線形関数を通す
+		// format を format 番号に変換
 		int fmt = 0;
 		switch (format) {
 		case SIGMOID:
@@ -209,12 +181,16 @@ public class SimpleNet {
 			fmt = 1;
 			break;
 		}
-		kp = Pointer.to(Pointer.to(devOutz), Pointer.to(devZ),
-				Pointer.to(new int[] {outn}), Pointer.to(new int[]{fmt}));
-		cuLaunchKernel(fMapper.get("calc_output"),
+
+		// foward 計算
+		Pointer kp = Pointer.to(Pointer.to(devOutz), Pointer.to(devW), Pointer.to(in),
+				Pointer.to(new int[]{inn}), Pointer.to(new int[]{outn}),
+				Pointer.to(new int[]{fmt})
+				);
+		cuLaunchKernel(fMapper.get("calc_forward"),
 				calcBlock(outn), 1, 1,
 				NTHREAD, 1, 1,
-				0, null,
+				Sizeof.FLOAT * outn, null,
 				kp, null
 				);
 		cuCtxSynchronize();
