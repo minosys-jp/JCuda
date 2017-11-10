@@ -1,14 +1,9 @@
-package tokyo.teqstock.app.jcuda.test;
+package tokyo.teqstock.jcuda.test;
 
 import java.io.IOException;
 import java.util.Map;
 import java.util.Random;
 import java.util.stream.IntStream;
-
-import tokyo.teqstock.app.jcuda.lib.MNIST;
-import tokyo.teqstock.app.jcuda.lib.NNUtil;
-import tokyo.teqstock.app.jcuda.lib.NeuralNet;
-import tokyo.teqstock.app.jcuda.lib.SimpleNet;
 
 import static jcuda.driver.JCudaDriver.cuMemcpyHtoD;
 import static jcuda.driver.JCudaDriver.cuMemcpyDtoH;
@@ -19,6 +14,10 @@ import jcuda.Pointer;
 import jcuda.Sizeof;
 import jcuda.driver.CUdeviceptr;
 import jcuda.driver.CUfunction;
+import tokyo.teqstock.jcuda.lib.MNIST;
+import tokyo.teqstock.jcuda.lib.NNUtil;
+import tokyo.teqstock.jcuda.lib.NeuralNet;
+import tokyo.teqstock.jcuda.lib.SimpleNet;
 
 /**
  * NeuralNetwork クラスのテスト

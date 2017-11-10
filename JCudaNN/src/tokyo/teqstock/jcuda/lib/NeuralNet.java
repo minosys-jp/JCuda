@@ -1,4 +1,4 @@
-package tokyo.teqstock.app.jcuda.lib;
+package tokyo.teqstock.jcuda.lib;
 
 import java.io.IOException;
 import java.util.Map;
@@ -16,7 +16,7 @@ import jcuda.Pointer;
 import jcuda.Sizeof;
 import jcuda.driver.CUdeviceptr;
 import jcuda.driver.CUfunction;
-import tokyo.teqstock.app.jcuda.lib.SimpleNet.OutputFormat;
+import tokyo.teqstock.jcuda.lib.SimpleNet.OutputFormat;
 
 /**
  * Neural Network implementations

@@ -1,4 +1,4 @@
-package tokyo.teqstock.app.jcuda.lib;
+package tokyo.teqstock.jcuda.lib;
 
 import java.io.BufferedInputStream;
 import java.io.IOException;
