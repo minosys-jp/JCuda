@@ -15,5 +15,6 @@ public interface ILoader {
 	public float[] getContent(int k);
 	public void setContentDev();
 	public CUdeviceptr getContentDev(int sample);
+	public CUdeviceptr getContentDev();
 	public float[][] getContent();
 }

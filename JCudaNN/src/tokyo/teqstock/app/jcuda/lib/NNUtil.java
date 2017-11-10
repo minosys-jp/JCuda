@@ -31,7 +31,7 @@ public class NNUtil {
 			"calc_deriv_b_kernel", "calc_deriv_w_kernel",
 			
 			// NeuralNet.java
-			"vec_add_1d", "vec_add_2d", "learn_1d", "learn_2d"
+			"vec_add_2d", "learn_1d", "learn_2d", "test_sum"
 	};
 	
 	/**

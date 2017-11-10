@@ -42,6 +42,8 @@ public class NeuralNet {
 
 	private final int[] nodes;
 	
+	private final int batchsize;
+	
 	/**
 	 * kernel function mappings
 	 */
@@ -54,6 +56,12 @@ public class NeuralNet {
 
 	public static class CUDARegion {
 		private final int[] nodes;
+		
+		public final int batchsize;
+		
+		public CUdeviceptr teacher;
+
+		public CUdeviceptr z0;
 		
 		public CUdeviceptr[] z;
 		
@@ -69,16 +77,30 @@ public class NeuralNet {
 		public CUdeviceptr[] devBDeltaArray, devBDerivArray;
 
 		/**
+		 * for bactch size
+		 */
+		public CUdeviceptr[][] devBDeltaArray2D, devBDerivArray2D;
+
+		public CUdeviceptr[] sumPtr;
+		
+		/**
 		 * constructor
 		 * 
 		 * @param nodes
 		 * @param sn
 		 * @param in
 		 */
-		public CUDARegion(int[] nodes, SimpleNet[] sn, CUdeviceptr in) {
+		public CUDARegion(int[] nodes, SimpleNet[] sn, int batchsize) {
 			this.nodes = nodes;
+			this.batchsize = batchsize;
+			teacher = new CUdeviceptr();
+			cuMemAlloc(teacher, Sizeof.INT * batchsize);
+		
+			z0 = new CUdeviceptr();
+			cuMemAlloc(z0, Sizeof.POINTER * batchsize);
+			
 			z = new CUdeviceptr[nodes.length];
-			z[0] = in;
+			z[0] = z0;
 			
 			// for delta w
 			devWDeltaArray2D = new CUdeviceptr[nodes.length - 1][];
@@ -105,25 +127,56 @@ public class NeuralNet {
 				});
 				devWDerivArray[k] = new CUdeviceptr();
 				cuMemAlloc(devWDerivArray[k], Sizeof.POINTER * nodes[k]);
-				cuMemcpyHtoD(devWDerivArray[k], Pointer.to(devWDeltaArray2D[k]), Sizeof.POINTER * nodes[k]);
+				cuMemcpyHtoD(devWDerivArray[k], Pointer.to(devWDerivArray2D[k]), Sizeof.POINTER * nodes[k]);
 			});
 			
 			// for delta b
 			devBDeltaArray = new CUdeviceptr[nodes.length - 1];
+			devBDeltaArray2D = new CUdeviceptr[nodes.length - 1][];
 			IntStream.range(0, nodes.length - 1).forEach(j->{
+				devBDeltaArray2D[j] = new CUdeviceptr[batchsize];
+				IntStream.range(0, batchsize).forEach(s->{
+					devBDeltaArray2D[j][s] = new CUdeviceptr();
+					cuMemAlloc(devBDeltaArray2D[j][s], Sizeof.FLOAT * nodes[j + 1]);
+				});
 				devBDeltaArray[j] = new CUdeviceptr();
-				cuMemAlloc(devBDeltaArray[j], Sizeof.FLOAT * nodes[j + 1]);
+				cuMemAlloc(devBDeltaArray[j], Sizeof.POINTER * batchsize);
+				cuMemcpyHtoD(devBDeltaArray[j], Pointer.to(devBDeltaArray2D[j]), Sizeof.POINTER * batchsize);
 			});
 
 			// for deriv b
 			devBDerivArray = new CUdeviceptr[nodes.length - 1];
+			devBDerivArray2D = new CUdeviceptr[nodes.length - 1][];
 			IntStream.range(0, nodes.length - 1).forEach(j->{
+				devBDerivArray2D[j] = new CUdeviceptr[batchsize];
+				IntStream.range(0, batchsize).forEach(s->{
+					devBDerivArray2D[j][s] = new CUdeviceptr();
+					cuMemAlloc(devBDerivArray2D[j][s], Sizeof.FLOAT * nodes[j + 1]);
+				});
 				devBDerivArray[j] = new CUdeviceptr();
-				cuMemAlloc(devBDerivArray[j], Sizeof.FLOAT * nodes[j + 1]);
+				cuMemAlloc(devBDerivArray[j], Sizeof.POINTER * batchsize);
+				cuMemcpyHtoD(devBDerivArray[j], Pointer.to(devBDerivArray2D[j]), Sizeof.POINTER * batchsize);
+			});
+			
+			// for test
+			sumPtr = new CUdeviceptr[nodes.length - 1];
+			IntStream.range(0, nodes.length - 1).forEach(k->{
+				sumPtr[k] = new CUdeviceptr();
+				cuMemAlloc(sumPtr[k], Sizeof.FLOAT * nodes[k + 1]);
 			});
 		}
 		
 		public void finalize() {
+			IntStream.range(0, nodes.length - 1).forEach(k->{
+				cuMemFree(sumPtr[k]);
+			});
+			
+			// free 0th order output (=input)
+			cuMemFree(z0);
+			
+			// free teacher indices
+			cuMemFree(teacher);
+			
 			IntStream.range(0, nodes.length - 1).forEach(k->{
 				IntStream.range(0,  nodes[k]).forEach(i->{
 					// free delta w
@@ -136,6 +189,10 @@ public class NeuralNet {
 				cuMemFree(devWDerivArray[k]);
 				
 				// free delta b
+				IntStream.range(0, batchsize).forEach(i->{
+					cuMemFree(devBDeltaArray2D[k][i]);
+					cuMemFree(devBDerivArray2D[k][i]);
+				});
 				cuMemFree(devBDeltaArray[k]);
 				
 				// free deriv b
@@ -151,17 +208,21 @@ public class NeuralNet {
 	
 	/**
 	 * constructor
-	 * @param nodes	# of nodes in array format
+	 * 
+	 * @param fMapper
+	 * @param lrate
+	 * @param nodes
 	 * @throws IOException
 	 */
-	public NeuralNet(Map<String, CUfunction> fMapper, float lrate, int[] nodes) throws IOException {
+	public NeuralNet(Map<String, CUfunction> fMapper, float lrate, int[] nodes, int batchsize) throws IOException {
 		this.LRATE = lrate;
 		this.nodes = nodes;
+		this.batchsize = batchsize;
 		this.fMapper = fMapper;
 		this.rand = new Random();
 		this.neurons = new SimpleNet[nodes.length - 1];
 		IntStream.range(0,  neurons.length).forEach(k->{
-			neurons[k] = new SimpleNet(fMapper, nodes[k], nodes[k + 1]);
+			neurons[k] = new SimpleNet(fMapper, nodes[k], nodes[k + 1], batchsize);
 			if (k == nodes.length - 2) {
 				neurons[k].format = OutputFormat.SOFTMAX;
 			}
@@ -170,7 +231,7 @@ public class NeuralNet {
 
 	/**
 	 * neural network forward operation
-	 * @param in
+	 * @param region
 	 * @return
 	 */
 	public CUdeviceptr forward(CUDARegion region) {
@@ -180,47 +241,6 @@ public class NeuralNet {
 		return region.z[neurons.length];
 	}
 
-	/**
-	 * host interface for the forward operation
-	 * @param in
-	 * @return
-	 */
-	public float[] forward(float[] in) {
-		// デバイスメモリへの転送
-		CUdeviceptr devIn = new CUdeviceptr();
-		cuMemAlloc(devIn, Sizeof.FLOAT * in.length);
-		cuMemcpyHtoD(devIn, Pointer.to(in), Sizeof.FLOAT * in.length);
-		
-		// forward 操作
-		CUDARegion region = new CUDARegion(nodes, neurons, devIn);
-		CUdeviceptr outz = forward(region);
-		
-		// ホストメモリへ転送
-		int outn = nodes[nodes.length - 1];
-		float[] out = new float[outn];
-		cuMemcpyDtoH(Pointer.to(out), outz, Sizeof.FLOAT * outn);
-		
-		// デバイスメモリを解放
-		cuMemFree(devIn);
-		return out;
-	}
-	
-	/**
-	 * １次元メモリのクリア
-	 * @param p
-d	 * @param size
-	 */
-	public void clearMem1D(Pointer p, int size) {
-		Pointer kp = Pointer.to(Pointer.to(p), Pointer.to(new int[]{size}));
-		CUfunction c1d = fMapper.get("clear1D");
-		int bsize = calcBlock(size);
-		cuLaunchKernel(c1d,
-				bsize, 1, 1,
-				NTHREAD, 1, 1,
-				0, null,
-				kp, null);
-	}
-	
 	/**
 	 * ２次元メモリのクリア
 	 * @param p
@@ -241,26 +261,20 @@ d	 * @param size
 	 * @param ilst
 	 * @param index
 	 */
-	public void backPropagate1(CUDARegion region, ImageLabelSet ils, int index) {
+	public void backPropagate1(CUDARegion region, ImageLabelSet ils, int[] index) {
 		// Phase1: calculate the derivatives
 		// 最外殻から計算を始める 
 		int m = neurons.length - 1;
-		CUdeviceptr teacher = ils.label.getContentDev(index);
+		cuMemcpyHtoD(region.teacher, Pointer.to(index), Sizeof.INT * region.batchsize);
 		CUdeviceptr delta = region.devBDeltaArray[m];
-		clearMem1D(delta, neurons[m].getOutn());
-		clearMem2D(region.devWDeltaArray[m], neurons[m].getInn(), neurons[m].getOutn());
-		cuCtxSynchronize();
-		neurons[m].calc_deriv_b(delta, null, teacher, true);
+		neurons[m].calc_deriv_b(delta, ils.label.getContentDev(), region.teacher, true);
 		neurons[m].calc_deriv_w(region.devWDeltaArray[m], region.z[m],
 				neurons[m].getInn(), delta, neurons[m].getOutn());
 		
 		while (--m >= 0) {
 			// 隠れ層の計算
 			delta = region.devBDeltaArray[m];
-			clearMem1D(delta, neurons[m].getOutn());
-			clearMem2D(region.devWDeltaArray[m], neurons[m].getInn(), neurons[m].getOutn());
-			cuCtxSynchronize();
-			neurons[m + 1].calc_deriv_b(delta, region.z[m + 1], region.devBDeltaArray[m + 1], false);;
+			neurons[m + 1].calc_deriv_b(delta, region.z[m + 1], region.devBDeltaArray[m + 1], false);
 			neurons[m].calc_deriv_w(region.devWDeltaArray[m], region.z[m],
 					neurons[m].getInn(), delta, neurons[m].getOutn());
 		}
@@ -272,11 +286,12 @@ d	 * @param size
 			Pointer kp = Pointer.to(
 					Pointer.to(region.devBDerivArray[k]),
 					Pointer.to(region.devBDeltaArray[k]),
+					Pointer.to(new int[]{batchsize}),
 					Pointer.to(new int[]{outn})
 					);
-			cuLaunchKernel(fMapper.get("vec_add_1d"),
-					calcBlock(outn), 1, 1,
-					NTHREAD, 1, 1,
+			cuLaunchKernel(fMapper.get("vec_add_2d"),
+					calcBlock2D(batchsize), calcBlock2D(outn), 1,
+					NTHREAD2, NTHREAD2, 1,
 					0, null,
 					kp, null);
 			kp = Pointer.to(
@@ -300,33 +315,37 @@ d	 * @param size
 	public void backPropagate(CUDARegion region, ImageLabelSet ils, int[] samples) {
 		// initialize deltas
 		IntStream.range(0, neurons.length).forEach(k->{
-			clearMem1D(region.devBDerivArray[k], neurons[k].getOutn());
+			clearMem2D(region.devBDerivArray[k], batchsize, neurons[k].getOutn());
 			clearMem2D(region.devWDerivArray[k], neurons[k].getInn(), neurons[k].getOutn());
 		});
 		cuCtxSynchronize();
 		
 		// phase1: accumulate deltas
-		IntStream.range(0, samples.length).forEach(m->{
-			// copy input data
-			region.z[0] = ils.image.getContentDev(samples[m]);
-			
-			// phase1: forward propagation
-			forward(region);
-			
-			// phase2: back propagation
-			backPropagate1(region, ils, samples[m]);
+		CUdeviceptr[] z0s = new CUdeviceptr[samples.length];
+		IntStream.range(0, samples.length).forEach(i->{
+			z0s[i] = ils.image.getContentDev(samples[i]);
 		});
+
+		// copy input data
+		cuMemcpyHtoD(region.z0, Pointer.to(z0s), Sizeof.POINTER * samples.length);
+		region.z[0] = region.z0;
+		
+		// forward operation
+		forward(region);
+		
+		// back propagation
+		backPropagate1(region, ils, samples);
 
 		// phase2: learning process
 		IntStream.range(0, neurons.length).forEach(k->{
 			SimpleNet net = neurons[k];
 			int inn = net.getInn();
 			int outn = net.getOutn();
-			
+		
 			// w の学習
 			Pointer kp = Pointer.to(
 					Pointer.to(neurons[k].devW),
-					Pointer.to(region.devWDerivArray),
+					Pointer.to(region.devWDerivArray[k]),
 					Pointer.to(new float[]{LRATE}),
 					Pointer.to(new int[]{inn}),
 					Pointer.to(new int[]{outn}),
@@ -342,10 +361,11 @@ d	 * @param size
 			// b の学習
 			kp = Pointer.to(
 					Pointer.to(neurons[k].devB),
-					Pointer.to(region.devBDerivArray),
+					Pointer.to(region.devBDerivArray[k]),
 					Pointer.to(new float[]{LRATE}),
 					Pointer.to(new int[]{outn}),
-					Pointer.to(new float[]{samples.length})
+					Pointer.to(new float[]{samples.length}),
+					Pointer.to(new int[]{batchsize})
 					);
 			cuLaunchKernel(fMapper.get("learn_1d"),
 					calcBlock(outn), 1, 1,
@@ -362,18 +382,44 @@ d	 * @param size
 	 * @param nset
 	 * @param batchsize
 	 */
-	public int[] backPropagate(CUDARegion region, ImageLabelSet ils, int nset, int batchsize) {
+	public int[] backPropagate(CUDARegion region, ImageLabelSet ils, int nset) {
 		int[] samples = new int[batchsize];
 		IntStream.range(0,  batchsize).forEach(i->{
 			samples[i] = rand.nextInt(ils.image.getQuantity());
 		});
 		IntStream.range(0, nset).forEach(i->{
 			backPropagate(region, ils, samples);
-			if (i % 10 == 0) {
-					System.out.print(".");
-			}
 		});
 		return samples;
+	}
+	
+	public float[] sumof_test(CUDARegion region) {
+		float[] bb = new float[nodes.length - 1];
+		IntStream.range(0, nodes.length - 1).forEach(n->{
+			SimpleNet net = neurons[n];
+			Pointer kp = Pointer.to(
+					Pointer.to(region.sumPtr[n]),
+					Pointer.to(region.devWDerivArray[n]),
+					Pointer.to(region.devBDerivArray[n]),
+					Pointer.to(new int[]{net.getInn()}),
+					Pointer.to(new int[]{net.getOutn()}),
+					Pointer.to(new int[]{batchsize})
+					);
+			cuLaunchKernel(fMapper.get("test_sum"),
+					calcBlock(net.getOutn()), 1, 1,
+					NTHREAD, 1, 1,
+					0, null,
+					kp, null
+					);
+			cuCtxSynchronize();
+			float[] bo = new float[net.getOutn()];
+			cuMemcpyDtoH(Pointer.to(bo), region.sumPtr[n], Sizeof.FLOAT * net.getOutn());
+
+			// sum for outn
+			float r = (float)IntStream.range(0, net.getOutn()).mapToDouble(j->bo[j]).sum();
+			bb[n] = r;
+		});
+		return bb;
 	}
 	
 	/**
@@ -381,73 +427,6 @@ d	 * @param size
 	 * @return
 	 */
 	public CUDARegion createDefaultCUDARegion() {
-		return new CUDARegion(nodes, neurons, null);
-	}
-
-	private static float calcLossFunction(float prev, float[] out, float[] label) {
-		float tmp = (float)IntStream.range(0, out.length).mapToDouble(i->
-		(out[i] - label[i]) * (out[i] - label[i]) / 2.0f)
-				.sum();
-		return prev + tmp;
-	}
-	
-	public static int argmax(float[] y) {
-		float xmax = -Float.MAX_VALUE;
-		int imax = 0;
-		
-		for (int i = 0; i < y.length; ++i) {
-			if (xmax < y[i]) {
-				imax = i;
-				xmax = y[i];
-			}
-		}
-		return imax;
-	}
-	
-	static class Count {
-		public long count = 0;
-		float loss = 0.0f;
-	}
-	
-	public static void main(String[] args) throws IOException {
-		Map<String, CUfunction> fMapper = NNUtil.initJCuda("JCudaNNKernel.cu");
-		NeuralNet nn = new NeuralNet(fMapper, 0.3f, new int[]{784, 100, 10});
-		Random rand = new Random();
-		MNIST teacher = MNIST.load("t10k-images-idx3-ubyte", "t10k-labels-idx1-ubyte", true, true);
-		CUDARegion region = nn.createDefaultCUDARegion();
-		float[] outf = new float[10];
-		int nsample = 10;
-		int[] samples = new int[nsample];
-		IntStream.range(0, nsample).forEach(i->{
-			samples[i] = rand.nextInt(teacher.getQuantity());
-		});
-		
-		IntStream.range(0, 20).forEach(k->{
-			nn.backPropagate(region, teacher, samples);
-			
-			Count count = new Count();
-			long total = nsample;
-
-			System.out.printf("loop: %d ==>", k);
-			count.loss = 0.0f;
-			IntStream.range(0, samples.length).forEach(i->{
-				region.z[0] = teacher.image.getContentDev(samples[i]);
-				CUdeviceptr out = nn.forward(region);
-				cuMemcpyDtoH(Pointer.to(outf), out, Sizeof.FLOAT * 10);
-//				IntStream.range(0, 10).forEachOrdered(j->{
-//					System.out.printf("%.4f,", outf[j]);
-//				});
-				int ao = NeuralNet.argmax(outf);
-				int al = NeuralNet.argmax(teacher.label.getContent(samples[i]));
-//				System.out.println(ao + ";" + al);
-				if (ao == al) {
-					++count.count;
-				}
-				count.loss = calcLossFunction(count.loss, outf, teacher.label.getContent(samples[i])); 
-			});
-			count.loss /= (float)nsample;
-			System.out.printf("accuracy: %.2f;", (double)count.count / (double)total * 100.0);
-			System.out.printf("loss:%.4f\n", count.loss);
-		});
+		return new CUDARegion(nodes, neurons, batchsize);
 	}
 }

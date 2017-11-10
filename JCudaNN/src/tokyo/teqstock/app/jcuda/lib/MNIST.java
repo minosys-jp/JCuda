@@ -142,6 +142,12 @@ public class MNIST extends ImageLabelSet {
 			// TODO Auto-generated method stub
 			return devMemArray[sample];
 		}
+
+		@Override
+		public CUdeviceptr getContentDev() {
+			// TODO Auto-generated method stub
+			return devMem;
+		}
 	}
 
 	/**
@@ -254,6 +260,12 @@ public class MNIST extends ImageLabelSet {
 		public CUdeviceptr getContentDev(int sample) {
 			// TODO Auto-generated method stub
 			return devBhotArray[sample];
+		}
+
+		@Override
+		public CUdeviceptr getContentDev() {
+			// TODO Auto-generated method stub
+			return devBhot;
 		}
 	}
 
