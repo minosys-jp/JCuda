@@ -8,6 +8,7 @@ import static jcuda.driver.JCudaDriver.cuMemAlloc;
 import static jcuda.driver.JCudaDriver.cuMemFree;
 import static jcuda.driver.JCudaDriver.cuMemcpyHtoD;
 import static jcuda.driver.JCudaDriver.cuMemcpyDtoH;
+import static jcuda.driver.JCudaDriver.cuMemcpyDtoD;
 import static jcuda.driver.JCudaDriver.cuLaunchKernel;
 import static jcuda.driver.JCudaDriver.cuCtxSynchronize;
 
@@ -86,6 +87,29 @@ public class SimpleNet {
 	private int calcBlock2D(int size) {
 		return (size + NTHREAD2 - 1) / NTHREAD2;
 	}
+
+	/**
+	 * copy the coefs to the SimpleNet
+	 * @param sn
+	 */
+	public void copyCoef(SimpleNet dst) {
+		// copy w
+		Pointer kp = Pointer.to(
+				Pointer.to(dst.devW),
+				Pointer.to(devW),
+				Pointer.to(new int[]{inn}),
+				Pointer.to(new int[]{outn})
+				);
+		cuLaunchKernel(fMapper.get("copy2D"),
+				calcBlock2D(inn), calcBlock2D(outn), 1,
+				NTHREAD2, NTHREAD2, 1,
+				0, null,
+				kp, null
+				);
+		
+		// copy b
+		cuMemcpyDtoD(dst.devB, devB, Sizeof.FLOAT * outn);
+	}
 	
 	/**
 	 * calculate the derivative for the biases of the loss function
@@ -98,7 +122,8 @@ public class SimpleNet {
 	public void calc_deriv_b(CUdeviceptr devDB, CUdeviceptr outz, CUdeviceptr in, boolean bMostouter) {
 		if (!bMostouter) {
 			Pointer kp = Pointer.to(
-					Pointer.to(devDB), Pointer.to(devW), Pointer.to(outz), Pointer.to(in),
+					Pointer.to(devDB), Pointer.to(devW), 
+					Pointer.to(outz), Pointer.to(in),
 					Pointer.to(new int[]{inn}), Pointer.to(new int[]{outn}),
 					Pointer.to(new int[]{batchsize})
 					);
@@ -226,7 +251,7 @@ public class SimpleNet {
 
 		// foward 計算
 		Pointer kp = Pointer.to(Pointer.to(devOutz), Pointer.to(devTmpz), 
-				Pointer.to(devW), Pointer.to(in),
+				Pointer.to(devW), Pointer.to(devB), Pointer.to(in),
 				Pointer.to(new int[]{inn}), Pointer.to(new int[]{outn}),
 				Pointer.to(new int[]{fmt}), Pointer.to(new int[]{batchsize})
 				);

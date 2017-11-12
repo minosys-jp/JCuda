@@ -71,9 +71,32 @@ __global__ void clear2D(float **w, int xsize, int ysize) {
   } 
 }
 
+// ２次元コピー
+extern "C"
+__global__ void copy2D(float **dst, float **src, int xsize, int ysize) {
+  const int x = blockDim.x * blockIdx.x + threadIdx.x;
+  const int y = blockDim.y * blockIdx.y + threadIdx.y;
+  
+  if (x < xsize && y < ysize) {
+    dst[x][y] = src[x][y];
+  }
+}
+
+// 間接的２次元集約コピー
+extern "C"
+__global__ void copy2DGather(float **dst, float **src, int xsize, int ysize, int *samples) {
+  const int x = blockDim.x * blockIdx.x + threadIdx.x;
+  const int y = blockDim.y * blockIdx.y + threadIdx.y;
+  
+  if (x < xsize && y < ysize) {
+    dst[x][y] = src[samples[x]][y];
+  }
+}
+
 // forward 演算
 extern "C"
-__global__ void calc_forward(float **outz, float **tmpz, float **w, float **xin, int xsize, int ysize, int fmt, int bs) {
+__global__ void calc_forward(float **outz, float **tmpz, float **w, float *b,
+  float **xin, int xsize, int ysize, int fmt, int bs) {
   const int y = blockDim.x * blockIdx.x + threadIdx.x;
   const int k = blockDim.y * blockIdx.y + threadIdx.y;
 
@@ -83,6 +106,7 @@ __global__ void calc_forward(float **outz, float **tmpz, float **w, float **xin,
     for (int x = 0; x < xsize; ++x) {
       ztmp += xin[k][x] * w[x][y];
     }
+    ztmp += b[y];
     tmpz[k][y] = ztmp;
   }
   __syncthreads();
@@ -183,6 +207,17 @@ __global__ void learn_1d(float *bout, float **deriv, float lrate, int size, floa
     for (int s = 0; s < bs; ++s) {
       bout[i] -= lrate * deriv[s][i] / nsample; 
     }
+  }
+}
+
+// 一様乱数によるノイズシェーピング
+extern "C"
+__global__ void noise_shape(float **inout, float *rnd, int xsize, int ysize, float threshold) {
+  const int x = blockDim.x * blockIdx.x + threadIdx.x;
+  const int y = blockDim.y * blockIdx.y + threadIdx.y;
+  
+  if (x < xsize && y < ysize && rnd[x + xsize * y] < threshold) {
+    inout[x][y] = 0.0f;
   }
 }
 

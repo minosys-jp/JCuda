@@ -14,12 +14,14 @@ import static jcuda.driver.JCudaDriver.cuDeviceGet;
 import static jcuda.driver.JCudaDriver.cuCtxCreate;
 import static jcuda.driver.JCudaDriver.cuModuleLoad;
 import static jcuda.driver.JCudaDriver.cuModuleGetFunction;
+import static jcuda.jcurand.JCurand.setExceptionsEnabled;
 
 import jcuda.driver.CUcontext;
 import jcuda.driver.CUdevice;
 import jcuda.driver.CUfunction;
 import jcuda.driver.CUmodule;
 import jcuda.driver.JCudaDriver;
+import jcuda.jcurand.JCurand;
 
 public class NNUtil {
 	/**
@@ -31,7 +33,16 @@ public class NNUtil {
 			"calc_deriv_b_kernel", "calc_deriv_w_kernel",
 			
 			// NeuralNet.java
-			"vec_add_2d", "learn_1d", "learn_2d", "test_sum"
+			"vec_add_2d", "learn_1d", "learn_2d", "test_sum",
+			
+			// AueoEncoderImageLabelSet.java
+			"copy2D",
+			
+			// AutoEncoderNode.java
+			"noise_shape",
+			
+			// AutoEncoder.java
+			"copy2DGather"
 	};
 	
 	/**
@@ -57,6 +68,7 @@ public class NNUtil {
 	public static Map<String, CUfunction> initJCuda(String cuFileName) throws IOException {
         // 例外処理を有効にする
         JCudaDriver.setExceptionsEnabled(true);
+        JCurand.setExceptionsEnabled(true);
         
 		// cu ファイルから ptx ファイルを（必要なら）コンパイルしてロード
         String ptxFileName = preparePtxFile(cuFileName);
