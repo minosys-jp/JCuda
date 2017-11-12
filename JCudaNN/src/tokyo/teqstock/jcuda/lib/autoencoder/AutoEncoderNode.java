@@ -8,6 +8,7 @@ import static jcuda.driver.JCudaDriver.cuMemAlloc;
 import static jcuda.driver.JCudaDriver.cuMemFree;
 import static jcuda.driver.JCudaDriver.cuMemcpyHtoD;
 import static jcuda.driver.JCudaDriver.cuLaunchKernel;
+import static jcuda.driver.JCudaDriver.cuCtxSynchronize;
 import static jcuda.jcurand.JCurand.curandCreateGenerator;
 import static jcuda.jcurand.JCurand.curandSetPseudoRandomGeneratorSeed;
 import static jcuda.jcurand.JCurand.curandGenerateUniform;
@@ -116,12 +117,14 @@ public class AutoEncoderNode {
 				cuMemAlloc(devInNoise, Sizeof.POINTER * n);
 				cuMemcpyHtoD(devInNoise, Pointer.to(devInNoiseArray), Sizeof.POINTER * n);
 			}
+			
 			// [0.0, 1.0) の乱数を作成する
-			curandGenerateUniform(generator, devNoise, n);
+			curandGenerateUniform(generator, devNoise, n * wha);
 			
 			// ノイズシェーピングする
 			Pointer kp = Pointer.to(
 					Pointer.to(devInNoise),
+					Pointer.to(devIn),
 					Pointer.to(devNoise),
 					Pointer.to(new int[]{n}),
 					Pointer.to(new int[]{wha}),
@@ -132,6 +135,7 @@ public class AutoEncoderNode {
 					NTHREAD2, NTHREAD2, 1,
 					0, null,
 					kp, null);
+			cuCtxSynchronize();
 			ils.setContentDev(devInNoise, devIn);
 		}
 	}
@@ -148,11 +152,11 @@ public class AutoEncoderNode {
 	}
 	
 	/**
-	 * ニューラルネットの最後のノード（デバイスメモリ）を返す
+	 * ニューラルネットの中間出力（デバイスメモリ）を返す
 	 * @return
 	 */
-	public CUdeviceptr getLeafNodes() {
-		return nn.neurons[nn.neurons.length - 1].devOutz;
+	public CUdeviceptr getOut0() {
+		return nn.neurons[0].devOutz;
 	}
 	
 	/**

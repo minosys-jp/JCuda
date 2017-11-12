@@ -17,6 +17,7 @@ import jcuda.driver.CUfunction;
 import jcuda.jcurand.curandGenerator;
 import tokyo.teqstock.jcuda.lib.ImageLabelSet;
 import tokyo.teqstock.jcuda.lib.NeuralNet;
+import tokyo.teqstock.jcuda.lib.SimpleNet;
 
 /**
  * AutoEncoder 実装
@@ -28,7 +29,6 @@ public class AutoEncoder {
 	private final int batchsize;
 	private final int nset;
 	private final int nsamples1, nsamples2;
-	private final float lRate;
 	private final float threshold;
 	private final int[] nodes;
 	public NeuralNet nn, nnleaf;
@@ -53,7 +53,6 @@ public class AutoEncoder {
 	public AutoEncoder(Map<String, CUfunction> fMapper,
 			Map<String, Integer> fParamMap, 
 			int[] nodes, float lRate, float threshold) throws IOException {
-		this.lRate = lRate;
 		this.threshold = threshold;
 		this.nodes = nodes;
 		this.batchsize = fParamMap.get("BATCHSIZE");
@@ -130,7 +129,7 @@ public class AutoEncoder {
 			// 上から順番に AutoEncoderNode をかけていく
 			IntStream.range(0,  nodes.length - 2).forEachOrdered(j->{
 				// デバイスメモリの準備
-				CUdeviceptr di = (j == 0)?devIn:aenodes[j - 1].getLeafNodes();
+				CUdeviceptr di = (j == 0)?devIn:aenodes[j - 1].getOut0();
 				aenodes[j].setContentDev(di, threshold);
 				
 				// 逆誤差散乱法による AutoEncoder 係数の算出
@@ -138,11 +137,14 @@ public class AutoEncoder {
 			});
 			
 			// 最後は通常の逆誤差散乱法を実行する
-			ilsleaf.setContentDev(aenodes[nodes.length - 2].getLeafNodes(), ils.label.getContentDev());
-			regionleaf.z[0] = aenodes[nodes.length - 2].getLeafNodes();
+			ilsleaf.setContentDev(aenodes[nodes.length - 2].getOut0(), ils.label.getContentDev());
+			regionleaf.z[0] = aenodes[nodes.length - 2].getOut0();
 			IntStream.range(0, nset).forEach(j->{
 				nnleaf.backPropagate(regionleaf, ilsleaf, totologyleaf);
 			});
+			
+			// 進行状況を表示
+			System.out.print(".");
 		});
 		
 		// phase1.5: 算出した係数を nn に集める
@@ -154,7 +156,13 @@ public class AutoEncoder {
 		// phase2: ファインチューニングを行う
 		IntStream.range(0, nsamples2).forEach(i->{
 			nn.backPropagate(region, ils, nset);
+			
+			// 進行状況を表示
+			System.out.print("@");
 		});
+		
+		// training 終了
+		System.out.println();
 	}
 	
 	/**
@@ -181,9 +189,10 @@ public class AutoEncoder {
 	 * @param count
 	 */
 	public void test(ImageLabelSet ils, int count) {
+		int outn = ils.label.getOutputCount();
 		CUdeviceptr sm = new CUdeviceptr();
 		cuMemAlloc(sm, Sizeof.POINTER * batchsize);
-		float[][] result = new float[batchsize][ils.label.getOutputCount()];
+		float[][] result = new float[batchsize][outn];
 		
 		IntStream.range(0, count).forEachOrdered(c->{
 			// samples を準備する
@@ -197,8 +206,9 @@ public class AutoEncoder {
 			// forward 操作
 			region.z[0] = sm;
 			nn.forward(region);
+			SimpleNet net = nn.neurons[nn.neurons.length - 1];
 			IntStream.range(0, batchsize).forEach(s->{
-				cuMemcpyDtoH(Pointer.to(result[s]), region.z[nodes.length - 1], Sizeof.POINTER * batchsize);
+				cuMemcpyDtoH(Pointer.to(result[s]), net.devOutz2D[s], Sizeof.FLOAT * outn);
 			});
 			double cc = (double)IntStream.range(0,  batchsize)
 					.filter(s->argmax(result[s]) == argmax(ils.label.getContent(s)))

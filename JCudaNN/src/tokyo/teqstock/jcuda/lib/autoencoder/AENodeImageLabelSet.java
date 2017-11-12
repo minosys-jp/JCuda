@@ -46,6 +46,13 @@ public class AENodeImageLabelSet extends AEImageLabelSet {
 	}
 
 	public void finalize() {
+		if (devOut != null) {
+			IntStream.range(0, n).forEach(i->{
+				cuMemFree(devOutArray[i]);
+			});
+			cuMemFree(devOut);
+			devOut = null;
+		}
 		if (devOutLabel != null) {
 			IntStream.range(0, n).forEach(i->{
 				cuMemFree(devOutLabelArray[i]);
@@ -62,6 +69,20 @@ public class AENodeImageLabelSet extends AEImageLabelSet {
 	 * @param devLabel
 	 */
 	public void setContentDev(CUdeviceptr devImage, CUdeviceptr devLabel) {
+		if (devOut == null) {
+			// メモリを確保する
+			devOutArray = new CUdeviceptr[n];
+			IntStream.range(0, n).forEach(i->{
+				devOutArray[i] = new CUdeviceptr();
+				cuMemAlloc(devOutArray[i], Sizeof.FLOAT * wh);
+			});
+			devOut = new CUdeviceptr();
+			cuMemAlloc(devOut, Sizeof.POINTER * n);
+			cuMemcpyHtoD(devOut, Pointer.to(devOutArray), Sizeof.POINTER * n);
+			
+			// AEImage の作成
+			image = new AEImageLabelSet.AEImage(devOut, devOutArray, wh);
+		}
 		if (devOutLabel == null) {
 			// メモリを確保する
 			devOutLabelArray = new CUdeviceptr[n];
@@ -71,10 +92,9 @@ public class AENodeImageLabelSet extends AEImageLabelSet {
 			});
 			devOutLabel = new CUdeviceptr();
 			cuMemAlloc(devOutLabel, Sizeof.POINTER * n);
-			cuMemcpyHtoD(devOutLabel, Pointer.to(devOutLabelArray), Sizeof.POINTER * getQuantity());
+			cuMemcpyHtoD(devOutLabel, Pointer.to(devOutLabelArray), Sizeof.POINTER * n);
 			
-			// AEImage, AELabel の作成
-			image = new AEImageLabelSet.AEImage(devOut, devOutArray, wh);
+			// AELabel の作成
 			label = new AEImageLabelSet.AELabel(devOutLabel, devOutLabelArray, lc);
 		}
 		

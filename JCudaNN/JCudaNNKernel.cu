@@ -212,12 +212,16 @@ __global__ void learn_1d(float *bout, float **deriv, float lrate, int size, floa
 
 // 一様乱数によるノイズシェーピング
 extern "C"
-__global__ void noise_shape(float **inout, float *rnd, int xsize, int ysize, float threshold) {
+__global__ void noise_shape(float **out, float **in, float *rnd, int xsize, int ysize, float threshold) {
   const int x = blockDim.x * blockIdx.x + threadIdx.x;
   const int y = blockDim.y * blockIdx.y + threadIdx.y;
   
-  if (x < xsize && y < ysize && rnd[x + xsize * y] < threshold) {
-    inout[x][y] = 0.0f;
+  if (x < xsize && y < ysize) {
+    if (rnd[x + xsize * y] < threshold) {
+      out[x][y] = 0.0f;
+    } else {
+      out[x][y] = in[x][y];
+    }
   }
 }
 
